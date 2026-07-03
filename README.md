@@ -49,9 +49,18 @@ npm run dev
 
 У каждого авторизованного пользователя свой файл:
 
-`data/users/{googleId}.json`
+`data/users/{googleId}.json` (локально) или ключ в **Vercel KV** (на Vercel).
 
 При первом входе, если есть старый `data/tasks.json`, данные автоматически переносятся в файл пользователя.
+
+### Деплой на Vercel
+
+1. **Storage → Create Database → KV** — подключите к проекту (появятся `KV_REST_API_URL` и `KV_REST_API_TOKEN`)
+2. Добавьте переменные из `.env.example` в Vercel → Settings → Environment Variables
+3. В Google Console добавьте redirect URI: `https://ваш-домен.vercel.app/auth/google`
+4. Пересоберите проект после добавления KV
+
+Без KV на Vercel `/api/store` вернёт 500 — файловая система serverless read-only.
 
 API (требуется сессия):
 

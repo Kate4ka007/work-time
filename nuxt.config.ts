@@ -1,4 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { resolveStoreStorageConfig } from './server/utils/storage-config'
+
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
@@ -19,8 +21,9 @@ export default defineNuxtConfig({
   },
 
   nitro: {
-    // preview запускается из .output — подгружаем .env из корня проекта
-    envPrefix: ['NUXT_', 'NUXT_OAUTH_'],
+    storage: {
+      store: resolveStoreStorageConfig(),
+    },
   },
 
   css: ['~/assets/css/main.css'],

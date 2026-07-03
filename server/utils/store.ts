@@ -1,10 +1,10 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
-import { accessSync, constants } from 'node:fs'
-import { dirname, join, basename } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { H3Event } from 'h3'
 import { z } from 'zod'
 import type { Store } from '#shared/types/store'
 import { createEmptyStore } from '#shared/types/store'
+import { hasRedisStorage } from './storage-config'
 
 const projectSchema = z.object({
   id: z.string().uuid(),
@@ -44,46 +44,28 @@ export const storeSchema = z.object({
 
 const writeLocks = new Map<string, Promise<void>>()
 
-function resolveDataDir(): string {
-  const cwd = process.cwd()
-  const isOutputDir = basename(cwd) === '.output'
-
-  const candidates = isOutputDir
-    ? [join(cwd, '..', 'data'), join(cwd, 'data')]
-    : [join(cwd, 'data'), join(cwd, '..', 'data')]
-
-  for (const dir of candidates) {
-    try {
-      accessSync(dir, constants.F_OK)
-      return dir
-    }
-    catch {
-      // try next candidate
-    }
-  }
-
-  return isOutputDir ? join(cwd, '..', 'data') : join(cwd, 'data')
-}
-
 function sanitizeUserId(userId: string): string {
   return userId.replace(/[^a-zA-Z0-9_-]/g, '_')
 }
 
-function getUsersDir(): string {
-  return join(resolveDataDir(), 'users')
+function storeKey(userId: string): string {
+  return `${sanitizeUserId(userId)}.json`
 }
 
-function getStorePath(userId: string): string {
-  return join(getUsersDir(), `${sanitizeUserId(userId)}.json`)
+function usesKvStorage(): boolean {
+  return hasRedisStorage()
 }
 
-function getLegacyStorePath(): string {
-  return join(resolveDataDir(), 'tasks.json')
+function parseStore(raw: unknown): Store {
+  const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+  return storeSchema.parse(parsed)
 }
 
 async function migrateLegacyStore(userId: string): Promise<Store | null> {
+  if (usesKvStorage()) return null
+
   try {
-    const raw = await readFile(getLegacyStorePath(), 'utf-8')
+    const raw = await readFile(join(process.cwd(), 'data', 'tasks.json'), 'utf-8')
     const parsed = storeSchema.parse(JSON.parse(raw))
     await writeStore(userId, parsed)
     return parsed
@@ -94,35 +76,38 @@ async function migrateLegacyStore(userId: string): Promise<Store | null> {
 }
 
 export async function readStore(userId: string): Promise<Store> {
-  const path = getStorePath(userId)
+  const storage = useStorage('store')
+  const key = storeKey(userId)
+
   try {
-    const raw = await readFile(path, 'utf-8')
-    const parsed = JSON.parse(raw)
-    return storeSchema.parse(parsed)
+    const raw = await storage.getItem(key)
+    if (raw != null) return parseStore(raw)
   }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      const migrated = await migrateLegacyStore(userId)
-      if (migrated) return migrated
-
-      const empty = createEmptyStore()
-      await writeStore(userId, empty)
-      return empty
+    if (error instanceof z.ZodError) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Invalid store data',
+      })
     }
     throw error
   }
+
+  const migrated = await migrateLegacyStore(userId)
+  if (migrated) return migrated
+
+  const empty = createEmptyStore()
+  await writeStore(userId, empty)
+  return empty
 }
 
 export async function writeStore(userId: string, store: Store): Promise<Store> {
   const validated = storeSchema.parse(store)
-  const path = getStorePath(userId)
-  const dir = dirname(path)
-  const tempPath = `${path}.tmp`
+  const key = storeKey(userId)
+  const payload = JSON.stringify(validated, null, 2)
 
   const task = async () => {
-    await mkdir(dir, { recursive: true })
-    await writeFile(tempPath, JSON.stringify(validated, null, 2), 'utf-8')
-    await rename(tempPath, path)
+    await useStorage('store').setItem(key, payload)
   }
 
   const previous = writeLocks.get(userId) ?? Promise.resolve()
