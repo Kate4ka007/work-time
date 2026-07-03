@@ -58,11 +58,24 @@ export default defineNuxtConfig({
     registerWebManifestInRouteRules: true,
     includeAssets: ['icons/*.png'],
     workbox: {
-      navigateFallback: '/',
+      // SSR: "/" не в precache — navigateFallback ломает SW (non-precached-url)
+      navigateFallback: null,
       globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
       runtimeCaching: [
         {
-          urlPattern: /^\/api\/store/i,
+          urlPattern: ({ request }) => request.mode === 'navigate',
+          handler: 'NetworkFirst',
+          options: {
+            cacheName: 'pages',
+            networkTimeoutSeconds: 5,
+          },
+        },
+        {
+          urlPattern: /^\/api\//i,
+          handler: 'NetworkOnly',
+        },
+        {
+          urlPattern: /^\/auth\//i,
           handler: 'NetworkOnly',
         },
       ],
