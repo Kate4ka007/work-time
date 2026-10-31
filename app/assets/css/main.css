@@ -77,7 +77,12 @@ textarea {
   flex-direction: column;
   gap: 0.5rem;
   flex-shrink: 0;
-  min-height: 100vh;
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
 }
 
 .sidebar__logo {
@@ -399,9 +404,12 @@ textarea {
 
   .sidebar {
     width: 100%;
-    min-height: auto;
+    height: auto;
+    position: static;
+    align-self: stretch;
     flex-direction: row;
     overflow-x: auto;
+    overflow-y: visible;
     padding: 0.75rem;
     border-right: none;
     border-bottom: 1px solid var(--border);
