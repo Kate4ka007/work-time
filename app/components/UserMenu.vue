@@ -1,6 +1,12 @@
 <script setup lang="ts">
 const { user } = useUserSession()
+const store = useTimeTrackerStore()
 const imageError = ref(false)
+
+async function logout() {
+  store.reset()
+  window.location.href = '/auth/logout'
+}
 
 const initial = computed(() => {
   const name = user.value?.name?.trim() || user.value?.email?.trim() || '?'
@@ -33,7 +39,7 @@ watch(() => user.value?.avatar, () => {
       <div class="user-menu__name">{{ user.name }}</div>
       <div class="user-menu__email">{{ user.email }}</div>
     </div>
-    <a href="/auth/logout" class="btn btn--ghost btn--sm user-menu__logout" title="Выйти">
+    <a href="/auth/logout" class="btn btn--ghost btn--sm user-menu__logout" title="Выйти" @click.prevent="logout">
       Выйти
     </a>
   </div>
