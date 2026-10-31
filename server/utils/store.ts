@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { H3Event } from 'h3'
 import { z } from 'zod'
@@ -42,6 +42,32 @@ export const storeSchema = z.object({
   activeTimer: activeTimerSchema.nullable(),
 })
 
+export const storeWriteSchema = storeSchema.superRefine((store, ctx) => {
+  const projectIds = new Set(store.projects.map(p => p.id))
+  const taskIds = new Set(store.tasks.map(t => t.id))
+
+  for (const task of store.tasks) {
+    if (!projectIds.has(task.projectId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Unknown projectId ${task.projectId}` })
+    }
+  }
+  for (const entry of store.entries) {
+    if (!taskIds.has(entry.taskId)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Unknown taskId ${entry.taskId}` })
+    }
+    const expected = new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime()
+    if (expected < 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Entry ended before it started' })
+    }
+    else if (entry.durationMs !== expected) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'durationMs does not match timestamps' })
+    }
+  }
+  if (store.activeTimer && !taskIds.has(store.activeTimer.taskId)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Unknown activeTimer.taskId ${store.activeTimer.taskId}` })
+  }
+})
+
 const writeLocks = new Map<string, Promise<void>>()
 
 function sanitizeUserId(userId: string): string {
@@ -61,18 +87,37 @@ function parseStore(raw: unknown): Store {
   return storeSchema.parse(parsed)
 }
 
+async function withUserLock(userId: string, task: () => Promise<void>): Promise<void> {
+  const lockKey = sanitizeUserId(userId)
+  const previous = writeLocks.get(lockKey) ?? Promise.resolve()
+  const next = previous.then(task, task)
+  writeLocks.set(lockKey, next)
+  try {
+    await next
+  }
+  finally {
+    if (writeLocks.get(lockKey) === next) writeLocks.delete(lockKey)
+  }
+}
+
 async function migrateLegacyStore(userId: string): Promise<Store | null> {
   if (usesKvStorage()) return null
 
-  try {
-    const raw = await readFile(join(process.cwd(), 'data', 'tasks.json'), 'utf-8')
-    const parsed = storeSchema.parse(JSON.parse(raw))
-    await writeStore(userId, parsed)
-    return parsed
-  }
-  catch {
-    return null
-  }
+  let migrated: Store | null = null
+  await withUserLock('__legacy_migrate__', async () => {
+    const legacyPath = join(process.cwd(), 'data', 'tasks.json')
+    try {
+      const raw = await readFile(legacyPath, 'utf-8')
+      const parsed = storeSchema.parse(JSON.parse(raw))
+      await writeStore(userId, parsed)
+      await rename(legacyPath, `${legacyPath}.migrated`)
+      migrated = parsed
+    }
+    catch {
+      migrated = null
+    }
+  })
+  return migrated
 }
 
 export async function readStore(userId: string): Promise<Store> {
@@ -102,18 +147,26 @@ export async function readStore(userId: string): Promise<Store> {
 }
 
 export async function writeStore(userId: string, store: Store): Promise<Store> {
-  const validated = storeSchema.parse(store)
+  let validated: Store
+  try {
+    validated = storeWriteSchema.parse(store)
+  }
+  catch (error) {
+    if (error instanceof z.ZodError) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: 'Invalid store data',
+      })
+    }
+    throw error
+  }
+
   const key = storeKey(userId)
   const payload = JSON.stringify(validated, null, 2)
 
-  const task = async () => {
+  await withUserLock(userId, async () => {
     await useStorage('store').setItem(key, payload)
-  }
-
-  const previous = writeLocks.get(userId) ?? Promise.resolve()
-  const next = previous.then(task, task)
-  writeLocks.set(userId, next)
-  await next
+  })
   return validated
 }
 
