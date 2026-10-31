@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Project } from '#shared/types/store'
-import { formatDuration } from '#shared/utils/format'
+import { formatDuration, pluralRu } from '#shared/utils/format'
 import { getProjectTotalMs } from '#shared/utils/reports'
 
 const props = defineProps<{
@@ -19,7 +19,7 @@ const taskCount = computed(() => store.getTasksByProject(props.project.id).lengt
       <div class="list-item__content">
         <div class="list-item__title">{{ project.name }}</div>
         <div class="list-item__meta">
-          {{ taskCount }} {{ taskCount === 1 ? 'задача' : taskCount < 5 ? 'задачи' : 'задач' }}
+          {{ taskCount }} {{ pluralRu(taskCount, 'задача', 'задачи', 'задач') }}
           · {{ formatDuration(totalMs) }}
         </div>
       </div>

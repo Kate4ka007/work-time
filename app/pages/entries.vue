@@ -27,6 +27,7 @@ async function deleteEntry(id: string) {
     <div class="card">
       <TimeEntryList
         :entries="store.sortedEntries"
+        deletable
         @delete="deleteEntry"
       />
     </div>

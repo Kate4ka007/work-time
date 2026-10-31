@@ -11,12 +11,19 @@ const tasks = computed(() => store.getTasksByProject(projectId.value))
 
 const newTaskName = ref('')
 const showAddTask = ref(false)
+const saving = ref(false)
 
 async function addTask() {
-  if (!newTaskName.value.trim()) return
-  await store.addTask(projectId.value, newTaskName.value)
-  newTaskName.value = ''
-  showAddTask.value = false
+  if (saving.value || !newTaskName.value.trim()) return
+  saving.value = true
+  try {
+    await store.addTask(projectId.value, newTaskName.value)
+    newTaskName.value = ''
+    showAddTask.value = false
+  }
+  finally {
+    saving.value = false
+  }
 }
 
 async function deleteTask(id: string) {
@@ -91,7 +98,7 @@ function handleStop() {
               <button type="button" class="btn btn--secondary" @click="showAddTask = false">
                 Отмена
               </button>
-              <button type="submit" class="btn btn--primary">
+              <button type="submit" class="btn btn--primary" :disabled="saving">
                 Создать
               </button>
             </div>

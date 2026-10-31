@@ -16,6 +16,7 @@ const startTime = ref('09:00')
 const endTime = ref('10:00')
 const note = ref('')
 const error = ref('')
+const saving = ref(false)
 
 const taskOptions = computed(() =>
   store.tasks.map(t => ({
@@ -26,10 +27,11 @@ const taskOptions = computed(() =>
 
 async function submit() {
   error.value = ''
-  if (!taskId.value) {
-    error.value = 'Выберите задачу'
+  if (saving.value || !taskId.value) {
+    if (!taskId.value) error.value = 'Выберите задачу'
     return
   }
+  saving.value = true
   try {
     const startedAt = new Date(`${date.value}T${startTime.value}:00`).toISOString()
     const endedAt = new Date(`${date.value}T${endTime.value}:00`).toISOString()
@@ -38,6 +40,9 @@ async function submit() {
   }
   catch (e) {
     error.value = e instanceof Error ? e.message : 'Ошибка сохранения'
+  }
+  finally {
+    saving.value = false
   }
 }
 </script>
@@ -83,7 +88,7 @@ async function submit() {
       <button type="button" class="btn btn--secondary" @click="emit('cancel')">
         Отмена
       </button>
-      <button type="submit" class="btn btn--primary">
+      <button type="submit" class="btn btn--primary" :disabled="saving">
         Сохранить
       </button>
     </div>

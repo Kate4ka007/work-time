@@ -74,11 +74,11 @@ export default defineNuxtConfig({
           },
         },
         {
-          urlPattern: /^\/api\//i,
+          urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
           handler: 'NetworkOnly',
         },
         {
-          urlPattern: /^\/auth\//i,
+          urlPattern: ({ url }) => url.pathname.startsWith('/auth/'),
           handler: 'NetworkOnly',
         },
       ],

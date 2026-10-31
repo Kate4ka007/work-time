@@ -4,9 +4,12 @@ import { formatDuration } from '#shared/utils/format'
 import { format, parseISO } from 'date-fns'
 import { ru } from 'date-fns/locale'
 
-defineProps<{
+withDefaults(defineProps<{
   entries: TimeEntry[]
-}>()
+  deletable?: boolean
+}>(), {
+  deletable: false,
+})
 
 const emit = defineEmits<{
   delete: [id: string]
@@ -47,7 +50,7 @@ function sourceLabel(source: TimeEntry['source']) {
           <template v-if="entry.note"> · {{ entry.note }}</template>
         </div>
       </div>
-      <div class="list-item__actions">
+      <div v-if="deletable" class="list-item__actions">
         <button
           class="btn btn--ghost btn--sm"
           title="Удалить"
