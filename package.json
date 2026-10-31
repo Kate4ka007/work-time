@@ -8,7 +8,8 @@
     "generate": "nuxt generate",
     "preview": "node --env-file=.env ./node_modules/nuxt/bin/nuxt.mjs preview",
     "postinstall": "nuxt prepare",
-    "generate-icons": "node scripts/generate-pwa-icons.mjs"
+    "generate-icons": "node scripts/generate-pwa-icons.mjs",
+    "test": "node --experimental-strip-types --test shared/utils/reports.test.ts shared/utils/format.test.ts"
   },
   "dependencies": {
     "@pinia/nuxt": "^0.11.0",
