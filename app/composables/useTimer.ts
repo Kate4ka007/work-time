@@ -9,7 +9,7 @@ export function useTimer() {
 
   const elapsedMs = computed(() => {
     if (!store.activeTimer) return 0
-    return now.value - new Date(store.activeTimer.startedAt).getTime()
+    return Math.max(0, now.value - new Date(store.activeTimer.startedAt).getTime())
   })
 
   const activeTask = computed(() => {
@@ -23,6 +23,7 @@ export function useTimer() {
   })
 
   function startTicking() {
+    now.value = Date.now()
     if (interval) return
     interval = setInterval(() => { now.value = Date.now() }, 1000)
   }

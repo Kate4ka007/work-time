@@ -14,7 +14,11 @@ const { refresh: refreshStore } = await useAsyncData(
 )
 
 watch(loggedIn, async (isLoggedIn) => {
-  if (isLoggedIn && !store.loaded) {
+  if (!isLoggedIn) {
+    store.reset()
+    return
+  }
+  if (!store.loaded) {
     await refreshStore()
   }
 })

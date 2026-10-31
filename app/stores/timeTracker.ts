@@ -2,10 +2,49 @@ import { defineStore } from 'pinia'
 import type { Store, Project, Task, TimeEntry } from '#shared/types/store'
 import { createEmptyStore } from '#shared/types/store'
 import { generateId, PROJECT_COLORS } from '#shared/utils/format'
-import { savePendingStore, clearPendingStore, loadPendingStore } from '~/composables/useOfflineQueue'
+import {
+  savePendingStore,
+  clearPendingStore,
+  loadPendingStore,
+  currentStoreUserId,
+} from '~/composables/useOfflineQueue'
 
 function apiFetch<T>(url: string, options?: FetchOptions<'json'>) {
   return useNuxtApp().$apiFetch<T>(url, options)
+}
+
+function snapshotStore(store: Store): Store {
+  return JSON.parse(JSON.stringify({
+    projects: store.projects,
+    tasks: store.tasks,
+    entries: store.entries,
+    activeTimer: store.activeTimer,
+  })) as Store
+}
+
+function fetchStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  if ('statusCode' in error && typeof error.statusCode === 'number') return error.statusCode
+  if ('status' in error && typeof error.status === 'number') return error.status
+  return undefined
+}
+
+function isRetryablePersistError(error: unknown): boolean {
+  const status = fetchStatus(error)
+  return status === undefined || status === 0 || status >= 500
+}
+
+let persistQueue: Promise<unknown> = Promise.resolve()
+let persistGeneration = 0
+
+function enqueuePersist<T>(task: () => Promise<T>): Promise<T | undefined> {
+  const generation = persistGeneration
+  const run = persistQueue.then(
+    () => generation === persistGeneration ? task() : Promise.resolve(undefined),
+    () => generation === persistGeneration ? task() : Promise.resolve(undefined),
+  )
+  persistQueue = run.then(() => undefined, () => undefined)
+  return run
 }
 
 export const useTimeTrackerStore = defineStore('timeTracker', {
@@ -39,15 +78,22 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
       this.loaded = true
     },
 
+    reset() {
+      persistGeneration += 1
+      const empty = createEmptyStore()
+      this.projects = empty.projects
+      this.tasks = empty.tasks
+      this.entries = empty.entries
+      this.activeTimer = empty.activeTimer
+      this.loaded = false
+      this.syncing = false
+      this.error = null
+    },
+
     async fetchStore() {
-      try {
-        const data = await apiFetch<Store>('/api/store')
-        this.hydrate(data)
-        this.error = null
-        return data
-      }
-      catch (e) {
-        if (import.meta.client) {
+      return enqueuePersist(async () => {
+        if (import.meta.client && navigator.onLine) {
+          await this.flushPendingUnlocked()
           const pending = await loadPendingStore<Store>()
           if (pending) {
             this.hydrate(pending)
@@ -55,42 +101,114 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
             return pending
           }
         }
-        this.error = 'Не удалось загрузить данные'
-        return null
-      }
+
+        try {
+          const data = await apiFetch<Store>('/api/store')
+          const pending = import.meta.client ? await loadPendingStore<Store>() : null
+          if (pending) {
+            this.hydrate(pending)
+            this.error = 'Офлайн — показаны локальные данные'
+            return pending
+          }
+          this.hydrate(data)
+          this.error = null
+          return data
+        }
+        catch (e) {
+          if (fetchStatus(e) === 401) {
+            this.reset()
+            this.error = 'Сессия истекла'
+            return null
+          }
+          if (import.meta.client) {
+            const pending = await loadPendingStore<Store>()
+            if (pending) {
+              this.hydrate(pending)
+              this.error = 'Офлайн — показаны локальные данные'
+              return pending
+            }
+          }
+          this.error = 'Не удалось загрузить данные'
+          return null
+        }
+      })
     },
 
     async persist() {
-      const payload: Store = {
-        projects: this.projects,
-        tasks: this.tasks,
-        entries: this.entries,
-        activeTimer: this.activeTimer,
-      }
+      return enqueuePersist(async () => {
+        const payload = snapshotStore(this)
 
-      if (import.meta.client && !navigator.onLine) {
-        await savePendingStore(payload)
-        return payload
-      }
-
-      this.syncing = true
-      try {
-        const saved = await apiFetch<Store>('/api/store', {
-          method: 'PUT',
-          body: payload,
-        })
-        this.hydrate(saved)
-        await clearPendingStore()
-        this.error = null
-        return saved
-      }
-      catch (e) {
-        if (import.meta.client) {
+        if (import.meta.client && !navigator.onLine) {
           await savePendingStore(payload)
           this.error = 'Офлайн — изменения сохранены локально'
           return payload
         }
-        throw e
+
+        this.syncing = true
+        try {
+          await apiFetch<Store>('/api/store', {
+            method: 'PUT',
+            body: payload,
+          })
+          const latest = snapshotStore(this)
+          if (JSON.stringify(latest) !== JSON.stringify(payload)) {
+            await savePendingStore(latest)
+          }
+          else {
+            await clearPendingStore()
+          }
+          this.error = null
+          return payload
+        }
+        catch (e) {
+          if (fetchStatus(e) === 401) {
+            this.reset()
+            this.error = 'Сессия истекла'
+            throw e
+          }
+          if (import.meta.client && isRetryablePersistError(e)) {
+            await savePendingStore(snapshotStore(this))
+            this.error = 'Офлайн — изменения сохранены локально'
+            return payload
+          }
+          if (import.meta.client) {
+            this.error = 'Не удалось сохранить данные'
+            return payload
+          }
+          throw e
+        }
+        finally {
+          this.syncing = false
+        }
+      })
+    },
+
+    async flushPendingUnlocked() {
+      if (!import.meta.client || !navigator.onLine || !currentStoreUserId()) return
+      const pending = await loadPendingStore<Store>()
+      if (!pending) return
+      this.syncing = true
+      try {
+        await apiFetch<Store>('/api/store', {
+          method: 'PUT',
+          body: pending,
+        })
+        await clearPendingStore()
+        this.hydrate(pending)
+        this.error = null
+      }
+      catch (e) {
+        if (fetchStatus(e) === 401) {
+          this.reset()
+          this.error = 'Сессия истекла'
+          return
+        }
+        if (isRetryablePersistError(e)) {
+          this.hydrate(pending)
+          this.error = 'Офлайн — показаны локальные данные'
+          return
+        }
+        this.error = 'Не удалось синхронизировать данные'
       }
       finally {
         this.syncing = false
@@ -99,24 +217,7 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
 
     async syncPending() {
       if (!import.meta.client || !navigator.onLine) return
-      const pending = await loadPendingStore<Store>()
-      if (!pending) return
-      this.syncing = true
-      try {
-        const saved = await apiFetch<Store>('/api/store', {
-          method: 'PUT',
-          body: pending,
-        })
-        this.hydrate(saved)
-        await clearPendingStore()
-        this.error = null
-      }
-      catch {
-        this.error = 'Не удалось синхронизировать данные'
-      }
-      finally {
-        this.syncing = false
-      }
+      return enqueuePersist(() => this.flushPendingUnlocked())
     },
 
     async addProject(name: string, color?: string) {
@@ -190,12 +291,13 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
       if (!this.activeTimer) return
       const endedAt = new Date()
       const startedAt = new Date(this.activeTimer.startedAt)
+      const durationMs = Math.max(0, endedAt.getTime() - startedAt.getTime())
       const entry: TimeEntry = {
         id: generateId(),
         taskId: this.activeTimer.taskId,
         startedAt: startedAt.toISOString(),
         endedAt: endedAt.toISOString(),
-        durationMs: endedAt.getTime() - startedAt.getTime(),
+        durationMs,
         source: 'timer',
       }
       this.entries.push(entry)
@@ -211,7 +313,10 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
       note?: string
     }) {
       const start = new Date(data.startedAt)
-      const end = new Date(data.endedAt)
+      let end = new Date(data.endedAt)
+      if (end < start) {
+        end = new Date(end.getTime() + 24 * 60 * 60 * 1000)
+      }
       if (end <= start) throw new Error('Время окончания должно быть позже начала')
 
       const entry: TimeEntry = {
@@ -238,7 +343,8 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
 
       const start = new Date(entry.startedAt)
       const end = new Date(entry.endedAt)
-      entry.durationMs = Math.max(0, end.getTime() - start.getTime())
+      if (end <= start) throw new Error('Время окончания должно быть позже начала')
+      entry.durationMs = end.getTime() - start.getTime()
       await this.persist()
     },
 

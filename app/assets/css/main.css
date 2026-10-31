@@ -399,6 +399,7 @@ textarea {
 
   .sidebar {
     width: 100%;
+    min-height: auto;
     flex-direction: row;
     overflow-x: auto;
     padding: 0.75rem;

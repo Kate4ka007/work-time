@@ -5,9 +5,12 @@ import { getTodayTotalMs } from '#shared/utils/reports'
 definePageMeta({ layout: 'default' })
 
 const store = useTimeTrackerStore()
-const { isRunning, startTimer, stopTimer } = useTimer()
+const { isRunning, elapsedMs, startTimer } = useTimer()
 
-const todayTotal = computed(() => formatDuration(getTodayTotalMs(store)))
+const todayTotal = computed(() => {
+  void elapsedMs.value
+  return formatDuration(getTodayTotalMs(store))
+})
 const recentEntries = computed(() => store.sortedEntries.slice(0, 5))
 </script>
 
@@ -50,7 +53,7 @@ const recentEntries = computed(() => store.sortedEntries.slice(0, 5))
         <h2 style="font-size: 1rem; font-weight: 600;">Последние записи</h2>
         <NuxtLink to="/entries" class="btn btn--ghost btn--sm">Все записи</NuxtLink>
       </div>
-      <TimeEntryList :entries="recentEntries" />
+      <TimeEntryList :entries="recentEntries" :deletable="false" />
     </div>
   </div>
 </template>

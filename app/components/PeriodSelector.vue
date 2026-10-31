@@ -11,6 +11,7 @@ const emit = defineEmits<{
 
 const options: { value: ReportPeriod; label: string }[] = [
   { value: 'day', label: 'День' },
+  { value: 'yesterday', label: 'Вчера' },
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
 ]

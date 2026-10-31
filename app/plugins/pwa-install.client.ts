@@ -1,11 +1,13 @@
 export default defineNuxtPlugin(() => {
   localStorage.removeItem('vite-pwa:hide-install')
 
-  const canInstall = ref(false)
-  const isInstalled = ref(false)
+  const pwaInstall = reactive({
+    canInstall: false,
+    isInstalled: false,
+  })
 
   function updateInstalled() {
-    isInstalled.value =
+    pwaInstall.isInstalled =
       window.matchMedia('(display-mode: standalone)').matches
       || (window.navigator as Navigator & { standalone?: boolean }).standalone === true
   }
@@ -14,24 +16,21 @@ export default defineNuxtPlugin(() => {
 
   // Не вызываем preventDefault — тогда Chrome показывает иконку в адресной строке
   window.addEventListener('beforeinstallprompt', () => {
-    canInstall.value = true
+    pwaInstall.canInstall = true
   })
 
   window.addEventListener('appinstalled', () => {
-    canInstall.value = false
-    isInstalled.value = true
+    pwaInstall.canInstall = false
+    pwaInstall.isInstalled = true
   })
 
   window.matchMedia('(display-mode: standalone)').addEventListener('change', (e) => {
-    if (e.matches) isInstalled.value = true
+    if (e.matches) pwaInstall.isInstalled = true
   })
 
   return {
     provide: {
-      pwaInstall: {
-        canInstall,
-        isInstalled,
-      },
+      pwaInstall,
     },
   }
 })

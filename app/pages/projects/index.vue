@@ -6,15 +6,22 @@ definePageMeta({ layout: 'default' })
 const store = useTimeTrackerStore()
 
 const showModal = ref(false)
+const saving = ref(false)
 const newName = ref('')
 const newColor = ref(PROJECT_COLORS[0])
 
 async function createProject() {
-  if (!newName.value.trim()) return
-  await store.addProject(newName.value, newColor.value)
-  newName.value = ''
-  newColor.value = PROJECT_COLORS[store.projects.length % PROJECT_COLORS.length]
-  showModal.value = false
+  if (saving.value || !newName.value.trim()) return
+  saving.value = true
+  try {
+    await store.addProject(newName.value, newColor.value)
+    newName.value = ''
+    newColor.value = PROJECT_COLORS[store.projects.length % PROJECT_COLORS.length]
+    showModal.value = false
+  }
+  finally {
+    saving.value = false
+  }
 }
 
 async function deleteProject(id: string) {
@@ -87,7 +94,7 @@ async function deleteProject(id: string) {
               <button type="button" class="btn btn--secondary" @click="showModal = false">
                 Отмена
               </button>
-              <button type="submit" class="btn btn--primary">
+              <button type="submit" class="btn btn--primary" :disabled="saving">
                 Создать
               </button>
             </div>
@@ -117,8 +124,15 @@ async function deleteProject(id: string) {
   transition: opacity 0.15s;
 }
 
-.project-wrapper:hover .project-delete {
+.project-wrapper:hover .project-delete,
+.project-wrapper:focus-within .project-delete {
   opacity: 1;
+}
+
+@media (max-width: 768px) {
+  .project-delete {
+    opacity: 1;
+  }
 }
 
 .color-picker {
