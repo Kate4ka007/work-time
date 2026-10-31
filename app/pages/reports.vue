@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { endOfDay, parseISO, startOfDay } from 'date-fns'
 import type { ReportPeriod } from '#shared/utils/reports'
-import { buildReport, periodToDateStrings } from '#shared/utils/reports'
+import { ALL_PROJECTS_ID, buildReport, periodToDateStrings, reportRangeFromDates } from '#shared/utils/reports'
 
 definePageMeta({ layout: 'default' })
 
@@ -18,7 +17,11 @@ watch(() => store.projects, (projects) => {
   if (!selectedProjectId.value && projects.length > 0) {
     selectedProjectId.value = projects[0].id
   }
-  if (selectedProjectId.value && !projects.some(p => p.id === selectedProjectId.value)) {
+  if (
+    selectedProjectId.value
+    && selectedProjectId.value !== ALL_PROJECTS_ID
+    && !projects.some(p => p.id === selectedProjectId.value)
+  ) {
     selectedProjectId.value = projects[0]?.id ?? ''
   }
 }, { immediate: true })
@@ -35,22 +38,25 @@ function applyPeriod(p: ReportPeriod) {
   excludedTaskIds.value = new Set()
 }
 
-const reportRange = computed(() => ({
-  start: startOfDay(parseISO(dateFrom.value)),
-  end: endOfDay(parseISO(dateTo.value)),
-}))
+const fallbackRange = periodToDateStrings('day')
 
-const emptyReport = computed(() => ({
-  periodLabel: '',
-  rangeStart: reportRange.value.start,
-  rangeEnd: reportRange.value.end,
-  totalMs: 0,
-  rows: [],
-  tasks: [],
-}))
+const reportRange = computed(() => reportRangeFromDates(dateFrom.value, dateTo.value))
+
+const emptyReport = computed(() => {
+  const range = reportRange.value ?? reportRangeFromDates(fallbackRange.dateFrom, fallbackRange.dateTo)
+    ?? { start: new Date(), end: new Date() }
+  return {
+    periodLabel: '',
+    rangeStart: range.start,
+    rangeEnd: range.end,
+    totalMs: 0,
+    rows: [],
+    tasks: [],
+  }
+})
 
 const report = computed(() => {
-  if (!selectedProjectId.value) return emptyReport.value
+  if (!selectedProjectId.value || !reportRange.value) return emptyReport.value
   return buildReport(store, {
     ...reportRange.value,
     projectId: selectedProjectId.value,
@@ -86,7 +92,7 @@ function toggleTask(taskId: string, included: boolean) {
 <template>
   <div>
     <h1 class="page-title">Отчёты</h1>
-    <p class="page-subtitle">Сводка по выбранному проекту</p>
+    <p class="page-subtitle">Сводка по времени</p>
 
     <div v-if="store.projects.length === 0" class="empty-state">
       <p>Нет проектов. Создайте проект, чтобы смотреть отчёты.</p>
@@ -100,6 +106,7 @@ function toggleTask(taskId: string, included: boolean) {
         <div class="form-group" style="margin-bottom: 1rem;">
           <label class="form-label" for="report-project">Проект</label>
           <select id="report-project" v-model="selectedProjectId" class="form-select">
+            <option :value="ALL_PROJECTS_ID">Все проекты</option>
             <option v-for="project in store.projects" :key="project.id" :value="project.id">
               {{ project.name }}
             </option>
@@ -144,6 +151,7 @@ function toggleTask(taskId: string, included: boolean) {
         <ReportTaskList
           :tasks="report.tasks"
           :excluded-task-ids="excludedTaskIds"
+          :show-project="selectedProjectId === ALL_PROJECTS_ID"
           @toggle="toggleTask"
         />
       </div>

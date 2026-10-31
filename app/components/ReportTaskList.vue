@@ -5,6 +5,7 @@ import { formatDuration } from '#shared/utils/format'
 const props = defineProps<{
   tasks: TaskReportRow[]
   excludedTaskIds: ReadonlySet<string>
+  showProject?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +38,7 @@ function isIncluded(taskId: string) {
         <span class="list-item__color" :style="{ background: row.project.color }" />
         <span class="task-list__content">
           <span class="task-list__name">{{ row.task.name }}</span>
+          <span v-if="showProject" class="task-list__project">{{ row.project.name }}</span>
         </span>
         <span class="task-list__duration">{{ formatDuration(row.durationMs) }}</span>
       </label>

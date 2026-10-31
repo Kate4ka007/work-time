@@ -5,6 +5,7 @@ import {
   endOfWeek,
   startOfMonth,
   endOfMonth,
+  subDays,
   isWithinInterval,
   parseISO,
   format,
@@ -12,7 +13,9 @@ import {
 import { ru } from 'date-fns/locale'
 import type { Store, Project, Task, TimeEntry } from '../types/store'
 
-export type ReportPeriod = 'day' | 'week' | 'month'
+export const ALL_PROJECTS_ID = 'all'
+
+export type ReportPeriod = 'day' | 'yesterday' | 'week' | 'month'
 
 export interface ProjectReportRow {
   project: Project
@@ -47,6 +50,10 @@ export function getPeriodRange(period: ReportPeriod, referenceDate: Date = new D
   switch (period) {
     case 'day':
       return { start: startOfDay(referenceDate), end: endOfDay(referenceDate) }
+    case 'yesterday': {
+      const day = subDays(referenceDate, 1)
+      return { start: startOfDay(day), end: endOfDay(day) }
+    }
     case 'week':
       return {
         start: startOfWeek(referenceDate, { locale: ru, weekStartsOn: 1 }),
@@ -80,15 +87,19 @@ function filterEntriesInRange(entries: TimeEntry[], start: Date, end: Date): Tim
   })
 }
 
+function tasksInReportScope(store: Store, projectId: string): Task[] {
+  if (projectId === ALL_PROJECTS_ID) return store.tasks
+  return store.tasks.filter(t => t.projectId === projectId)
+}
+
 export function buildReport(store: Store, options: ReportOptions): ReportResult {
   const { start, end, projectId, excludedTaskIds } = options
-  const project = store.projects.find(p => p.id === projectId)
-  const projectTaskIds = new Set(
-    store.tasks.filter(t => t.projectId === projectId).map(t => t.id),
-  )
+  const scopedTasks = tasksInReportScope(store, projectId)
+  const scopedTaskIds = new Set(scopedTasks.map(t => t.id))
+  const taskById = new Map(scopedTasks.map(t => [t.id, t]))
 
   const allEntriesInRange = filterEntriesInRange(store.entries, start, end)
-    .filter(e => projectTaskIds.has(e.taskId))
+    .filter(e => scopedTaskIds.has(e.taskId))
   const includedEntries = allEntriesInRange.filter(e => !excludedTaskIds?.has(e.taskId))
 
   const fullDurationByTask = new Map<string, number>()
@@ -97,25 +108,38 @@ export function buildReport(store: Store, options: ReportOptions): ReportResult 
   }
 
   const durationByTask = new Map<string, number>()
-
   for (const entry of includedEntries) {
     durationByTask.set(entry.taskId, (durationByTask.get(entry.taskId) ?? 0) + entry.durationMs)
   }
 
   const totalMs = [...durationByTask.values()].reduce((sum, ms) => sum + ms, 0)
 
-  const projectDurationMs = totalMs
-  const rows: ProjectReportRow[] = project && projectDurationMs > 0
-    ? [{
-        project,
-        durationMs: projectDurationMs,
-        percentage: 100,
-      }]
-    : []
+  const durationByProjectId = new Map<string, number>()
+  for (const entry of includedEntries) {
+    const task = taskById.get(entry.taskId)
+    if (!task) continue
+    durationByProjectId.set(
+      task.projectId,
+      (durationByProjectId.get(task.projectId) ?? 0) + entry.durationMs,
+    )
+  }
 
-  const tasks: TaskReportRow[] = store.tasks
-    .filter(task => task.projectId === projectId)
+  const rows: ProjectReportRow[] = [...durationByProjectId.entries()]
+    .map(([pid, durationMs]) => {
+      const project = store.projects.find(p => p.id === pid)
+      if (!project || durationMs <= 0) return null
+      return {
+        project,
+        durationMs,
+        percentage: totalMs > 0 ? (durationMs / totalMs) * 100 : 0,
+      }
+    })
+    .filter((row): row is ProjectReportRow => row !== null)
+    .sort((a, b) => b.durationMs - a.durationMs)
+
+  const tasks: TaskReportRow[] = scopedTasks
     .map((task) => {
+      const project = store.projects.find(p => p.id === task.projectId)
       if (!project) return null
       const durationMs = fullDurationByTask.get(task.id) ?? 0
       if (durationMs === 0) return null
@@ -140,10 +164,26 @@ export function buildReport(store: Store, options: ReportOptions): ReportResult 
   }
 }
 
-export function getTodayTotalMs(store: Store): number {
-  const { start, end } = getPeriodRange('day')
-  return filterEntriesInRange(store.entries, start, end)
+export function reportRangeFromDates(dateFrom: string, dateTo: string): { start: Date; end: Date } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) return null
+  if (dateFrom > dateTo) return null
+  const start = startOfDay(parseISO(dateFrom))
+  const end = endOfDay(parseISO(dateTo))
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return null
+  return { start, end }
+}
+
+export function getTodayTotalMs(store: Store, now = Date.now()): number {
+  const { start, end } = getPeriodRange('day', new Date(now))
+  let total = filterEntriesInRange(store.entries, start, end)
     .reduce((sum, e) => sum + e.durationMs, 0)
+  if (store.activeTimer) {
+    const startedAt = parseISO(store.activeTimer.startedAt)
+    if (!Number.isNaN(startedAt.getTime()) && isWithinInterval(startedAt, { start, end })) {
+      total += Math.max(0, now - startedAt.getTime())
+    }
+  }
+  return total
 }
 
 export function getProjectTotalMs(store: Store, projectId: string): number {
