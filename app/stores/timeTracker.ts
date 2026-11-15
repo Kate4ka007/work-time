@@ -258,7 +258,9 @@ export const useTimeTrackerStore = defineStore('timeTracker', {
         name: name.trim(),
         createdAt: new Date().toISOString(),
       }
-      this.tasks.push(task)
+      const insertAt = this.tasks.findIndex(t => t.projectId === projectId)
+      if (insertAt === -1) this.tasks.push(task)
+      else this.tasks.splice(insertAt, 0, task)
       await this.persist()
       return task
     },

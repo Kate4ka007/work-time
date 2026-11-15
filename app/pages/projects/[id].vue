@@ -10,16 +10,24 @@ const project = computed(() => store.getProjectById(projectId.value))
 const tasks = computed(() => store.getTasksByProject(projectId.value))
 
 const newTaskName = ref('')
+const startAfterCreate = ref(true)
 const showAddTask = ref(false)
 const saving = ref(false)
+
+function openAddTask() {
+  startAfterCreate.value = true
+  showAddTask.value = true
+}
 
 async function addTask() {
   if (saving.value || !newTaskName.value.trim()) return
   saving.value = true
   try {
-    await store.addTask(projectId.value, newTaskName.value)
+    const task = await store.addTask(projectId.value, newTaskName.value)
+    const shouldStart = startAfterCreate.value
     newTaskName.value = ''
     showAddTask.value = false
+    if (shouldStart) await startTimer(task.id)
   }
   finally {
     saving.value = false
@@ -58,7 +66,7 @@ function handleStop() {
       <div class="card" style="margin-top: 1rem;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h2 style="font-size: 1rem; font-weight: 600;">Задачи</h2>
-          <button class="btn btn--primary btn--sm" @click="showAddTask = true">
+          <button class="btn btn--primary btn--sm" @click="openAddTask">
             + Задача
           </button>
         </div>
@@ -94,6 +102,10 @@ function handleStop() {
                 required
               >
             </div>
+            <label class="start-now">
+              <input v-model="startAfterCreate" type="checkbox">
+              <span>Запустить таймер</span>
+            </label>
             <div class="modal__actions">
               <button type="button" class="btn btn--secondary" @click="showAddTask = false">
                 Отмена
@@ -108,3 +120,23 @@ function handleStop() {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.start-now {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.start-now input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+</style>
